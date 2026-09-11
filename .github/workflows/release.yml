@@ -91,6 +91,12 @@ jobs:
 
   build-mac:
     runs-on: ${{ matrix.runner }}
+    env:
+      CSC_LINK: ${{ secrets.APPLE_SIGNING_CERT }}
+      CSC_KEY_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
+      API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
     strategy:
       matrix:
@@ -158,6 +164,7 @@ jobs:
           cp macos/icon.icns Slipped.app/Contents/Resources/icon.icns
 
       - name: Import signing certificate
+        if: env.CSC_LINK != '' && env.APPLE_API_KEY != ''
         env:
           CSC_LINK: ${{ secrets.APPLE_SIGNING_CERT }}
           CSC_KEY_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
@@ -171,12 +178,14 @@ jobs:
           rm certificate.p12
 
       - name: Sign the executables
+        if: env.CSC_LINK != '' && env.APPLE_API_KEY != ''
         run: |
           codesign --force --options runtime --sign "Developer ID Application" Slipped.app/Contents/MacOS/Slipped
           codesign --force --options runtime --sign "Developer ID Application" Slipped.app
           codesign --force --options runtime --sign "Developer ID Application" ${{ matrix.cli_name }}
 
       - name: Notarize the executables
+        if: env.CSC_LINK != '' && env.APPLE_API_KEY != ''
         env:
           API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
