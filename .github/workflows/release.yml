@@ -50,44 +50,44 @@ jobs:
       - name: Build GUI (X11)
         run:
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -tags static -ldflags "-s
-          -w -X 'equilotl/buildinfo.InstallerGitHash=$(git rev-parse --short
-          HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
-          Equilotl-x11
+          -w -X 'slipped/buildinfo.InstallerGitHash=$(git rev-parse --short
+          HEAD)' -X 'slipped/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
+          Slipped-x11
 
       - name: Build GUI (Wayland)
         run:
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -tags "static wayland"
-          -ldflags "-s -w -X 'equilotl/buildinfo.InstallerGitHash=$(git
-          rev-parse --short HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{
-          github.ref_name }}'" -o Equilotl-wayland
+          -ldflags "-s -w -X 'slipped/buildinfo.InstallerGitHash=$(git
+          rev-parse --short HEAD)' -X 'slipped/buildinfo.InstallerTag=${{
+          github.ref_name }}'" -o Slipped-wayland
 
       - name: Build GUI (Combined)
         run:
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -tags "static combined"
-          -ldflags "-s -w -X 'equilotl/buildinfo.InstallerGitHash=$(git
-          rev-parse --short HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{
-          github.ref_name }}'" -o Equilotl
+          -ldflags "-s -w -X 'slipped/buildinfo.InstallerGitHash=$(git
+          rev-parse --short HEAD)' -X 'slipped/buildinfo.InstallerTag=${{
+          github.ref_name }}'" -o Slipped
 
       - name: Build CLI
         run:
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -tags "cli" -ldflags "-s
-          -w -X 'equilotl/buildinfo.InstallerGitHash=$(git rev-parse --short
-          HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
-          EquilotlCli-linux
+          -w -X 'slipped/buildinfo.InstallerGitHash=$(git rev-parse --short
+          HEAD)' -X 'slipped/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
+          SlippedCli-linux
 
       - name: Update executable
         run: |
-          chmod +x Equilotl*
+          chmod +x Slipped*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Equilotl-linux
+          name: Slipped-linux
           path: |
-            Equilotl-x11
-            Equilotl-wayland
-            Equilotl
-            EquilotlCli-linux
+            Slipped-x11
+            Slipped-wayland
+            Slipped
+            SlippedCli-linux
 
   build-mac:
     runs-on: ${{ matrix.runner }}
@@ -97,14 +97,14 @@ jobs:
         include:
           - arch: amd64
             runner: macos-15-intel
-            artifact_name: Equilotl-macos
-            gui_name: Equilotl-darwin-x64.zip
-            cli_name: EquilotlCli-darwin-x64
+            artifact_name: Slipped-macos
+            gui_name: Slipped-darwin-x64.zip
+            cli_name: SlippedCli-darwin-x64
           - arch: arm64
             runner: macos-latest
-            artifact_name: Equilotl-macos-arm64
-            gui_name: Equilotl-darwin-arm64.zip
-            cli_name: EquilotlCli-darwin-arm64
+            artifact_name: Slipped-macos-arm64
+            gui_name: Slipped-darwin-arm64.zip
+            cli_name: SlippedCli-darwin-arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -133,29 +133,29 @@ jobs:
         run: CGO_CFLAGS="-mmacosx-version-min=10.15"
           CGO_LDFLAGS="-mmacosx-version-min=10.15" CGO_ENABLED=1 GOOS=darwin
           GOARCH=${{ matrix.arch }} go build -v -tags "static gui" -ldflags "-s
-          -w -X 'equilotl/buildinfo.InstallerGitHash=$(git rev-parse --short
-          HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
-          Equilotl
+          -w -X 'slipped/buildinfo.InstallerGitHash=$(git rev-parse --short
+          HEAD)' -X 'slipped/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
+          Slipped
 
       - name: Build CLI
         run: CGO_CFLAGS="-mmacosx-version-min=10.15"
           CGO_LDFLAGS="-mmacosx-version-min=10.15" CGO_ENABLED=1 GOOS=darwin
           GOARCH=${{ matrix.arch }} go build -v -tags "cli" -ldflags "-s
-          -w -X 'equilotl/buildinfo.InstallerGitHash=$(git rev-parse --short
-          HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
+          -w -X 'slipped/buildinfo.InstallerGitHash=$(git rev-parse --short
+          HEAD)' -X 'slipped/buildinfo.InstallerTag=${{ github.ref_name }}'" -o
           ${{ matrix.cli_name }}
 
       - name: Update executable
         run: |
-          chmod +x Equilotl*
+          chmod +x Slipped*
 
       - name: Generate MacOS GUI bundle
         run: |
-          mkdir -p Equilotl.app/Contents/MacOS
-          mkdir -p Equilotl.app/Contents/Resources
-          cp macos/Info.plist Equilotl.app/Contents/Info.plist
-          mv Equilotl Equilotl.app/Contents/MacOS/Equilotl
-          cp macos/icon.icns Equilotl.app/Contents/Resources/icon.icns
+          mkdir -p Slipped.app/Contents/MacOS
+          mkdir -p Slipped.app/Contents/Resources
+          cp macos/Info.plist Slipped.app/Contents/Info.plist
+          mv Slipped Slipped.app/Contents/MacOS/Slipped
+          cp macos/icon.icns Slipped.app/Contents/Resources/icon.icns
 
       - name: Import signing certificate
         env:
@@ -172,8 +172,8 @@ jobs:
 
       - name: Sign the executables
         run: |
-          codesign --force --options runtime --sign "Developer ID Application" Equilotl.app/Contents/MacOS/Equilotl
-          codesign --force --options runtime --sign "Developer ID Application" Equilotl.app
+          codesign --force --options runtime --sign "Developer ID Application" Slipped.app/Contents/MacOS/Slipped
+          codesign --force --options runtime --sign "Developer ID Application" Slipped.app
           codesign --force --options runtime --sign "Developer ID Application" ${{ matrix.cli_name }}
 
       - name: Notarize the executables
@@ -183,15 +183,15 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           echo "$API_KEY" > apple.p8
-          ditto -c -k --keepParent Equilotl.app Equilotl-notarize.zip
-          ditto -c -k ${{ matrix.cli_name }} EquilotlCli-notarize.zip
-          xcrun notarytool submit Equilotl-notarize.zip --key apple.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
-          xcrun stapler staple Equilotl.app
-          xcrun notarytool submit EquilotlCli-notarize.zip --key apple.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
-          rm apple.p8 Equilotl-notarize.zip EquilotlCli-notarize.zip
+          ditto -c -k --keepParent Slipped.app Slipped-notarize.zip
+          ditto -c -k ${{ matrix.cli_name }} SlippedCli-notarize.zip
+          xcrun notarytool submit Slipped-notarize.zip --key apple.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple Slipped.app
+          xcrun notarytool submit SlippedCli-notarize.zip --key apple.p8 --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          rm apple.p8 Slipped-notarize.zip SlippedCli-notarize.zip
 
       - name: Create final zip
-        run: zip -r ${{ matrix.gui_name }} Equilotl.app
+        run: zip -r ${{ matrix.gui_name }} Slipped.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -242,20 +242,20 @@ jobs:
         shell: msys2 {0}
         run: |
           go-winres make --product-version "git-tag"
-          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -v -tags "static gui" -ldflags "-s -w -H=windowsgui -extldflags=-static -X 'equilotl/buildinfo.InstallerGitHash=$(git rev-parse --short HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{ github.ref_name }}'" -o Equilotl.exe
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -v -tags "static gui" -ldflags "-s -w -H=windowsgui -extldflags=-static -X 'slipped/buildinfo.InstallerGitHash=$(git rev-parse --short HEAD)' -X 'slipped/buildinfo.InstallerTag=${{ github.ref_name }}'" -o Slipped.exe
 
       - name: Build CLI
         shell: msys2 {0}
         run: |
-          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -v -tags "cli" -ldflags "-s -w -X 'equilotl/buildinfo.InstallerGitHash=$(git rev-parse --short HEAD)' -X 'equilotl/buildinfo.InstallerTag=${{ github.ref_name }}'" -o EquilotlCli.exe
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -v -tags "cli" -ldflags "-s -w -X 'slipped/buildinfo.InstallerGitHash=$(git rev-parse --short HEAD)' -X 'slipped/buildinfo.InstallerTag=${{ github.ref_name }}'" -o SlippedCli.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Equilotl-windows
+          name: Slipped-windows
           path: |
-            Equilotl.exe
-            EquilotlCli.exe
+            Slipped.exe
+            SlippedCli.exe
 
   release:
     runs-on: ubuntu-latest
@@ -268,24 +268,24 @@ jobs:
       - name: "Download Linux Artifacts"
         uses: actions/download-artifact@v8
         with:
-          name: Equilotl-linux
+          name: Slipped-linux
           path: linux
 
       - name: "Download MacOS Artifacts"
         uses: actions/download-artifact@v8
         with:
-          name: Equilotl-macos
+          name: Slipped-macos
           path: macos
 
       - uses: actions/download-artifact@v8
         with:
-          name: Equilotl-macos-arm64
+          name: Slipped-macos-arm64
           path: macos
 
       - name: "Download Windows Artifacts"
         uses: actions/download-artifact@v8
         with:
-          name: Equilotl-windows
+          name: Slipped-windows
           path: windows
 
       - name: Delete existing release
@@ -303,14 +303,14 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           draft: false
           body: |
-            This is release ${{ github.ref_name }} of Equilotl.
+            This is release ${{ github.ref_name }} of Slipped.
           files: |
-            linux/Equilotl-x11
-            linux/Equilotl-wayland
-            linux/Equilotl
-            linux/EquilotlCli-linux
-            macos/Equilotl-darwin-x64.zip
-            macos/Equilotl-darwin-arm64.zip
-            macos/EquilotlCli-darwin-x64
-            macos/EquilotlCli-darwin-arm64
-            windows/Equilotl*.exe
+            linux/Slipped-x11
+            linux/Slipped-wayland
+            linux/Slipped
+            linux/SlippedCli-linux
+            macos/Slipped-darwin-x64.zip
+            macos/Slipped-darwin-arm64.zip
+            macos/SlippedCli-darwin-x64
+            macos/SlippedCli-darwin-arm64
+            windows/Slipped*.exe

@@ -1,4 +1,4 @@
-module equilotl
+module slipped
 
 go 1.26.2
 

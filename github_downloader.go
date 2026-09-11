@@ -82,7 +82,7 @@ func GetGithubRelease(url, fallbackUrl string) (*GithubRelease, error) {
 func InitGithubDownloader() {
 	GithubDoneChan = make(chan bool, 1)
 
-	IsDevInstall = os.Getenv("EQUICORD_DEV_INSTALL") == "1"
+	IsDevInstall = os.Getenv("SLIPCORD_DEV_INSTALL") == "1"
 	Log.Debug("Is Dev Install: ", IsDevInstall)
 	if IsDevInstall {
 		GithubDoneChan <- true
@@ -110,27 +110,27 @@ func InitGithubDownloader() {
 	}()
 
 	// either .asar file or directory with main.js file (in DEV)
-	EquicordFile := EquicordDirectory
+	SlipcordFile := SlipcordDirectory
 
-	stat, err := os.Stat(EquicordFile)
+	stat, err := os.Stat(SlipcordFile)
 	if err != nil {
 		return
 	}
 
 	// dev
 	if stat.IsDir() {
-		EquicordFile = path.Join(EquicordFile, "main.js")
+		SlipcordFile = path.Join(SlipcordFile, "main.js")
 	}
 
 	// Check hash of installed version if exists
-	b, err := os.ReadFile(EquicordFile)
+	b, err := os.ReadFile(SlipcordFile)
 	if err != nil {
 		return
 	}
 
-	Log.Debug("Found existing Equicord Install. Checking for hash...")
+	Log.Debug("Found existing Slipcord Install. Checking for hash...")
 
-	re := regexp.MustCompile(`// Equicord (\w+)`)
+	re := regexp.MustCompile(`// Slipcord (\w+)`)
 	match := re.FindSubmatch(b)
 	if match != nil {
 		InstalledHash = string(match[1])
@@ -175,15 +175,15 @@ func installLatestBuilds() (retErr error) {
 		retErr = err
 		return
 	}
-	out, err := os.OpenFile(EquicordDirectory, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	out, err := os.OpenFile(SlipcordDirectory, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		Log.Error("Failed to create", EquicordDirectory+":", err)
+		Log.Error("Failed to create", SlipcordDirectory+":", err)
 		retErr = err
 		return
 	}
 	read, err := io.Copy(out, res.Body)
 	if err != nil {
-		Log.Error("Failed to download to", EquicordDirectory+":", err)
+		Log.Error("Failed to download to", SlipcordDirectory+":", err)
 		retErr = err
 		return
 	}
@@ -196,7 +196,7 @@ func installLatestBuilds() (retErr error) {
 		return
 	}
 
-	_ = FixOwnership(EquicordDirectory)
+	_ = FixOwnership(SlipcordDirectory)
 
 	InstalledHash = LatestHash
 	return

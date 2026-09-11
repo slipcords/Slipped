@@ -1,6 +1,6 @@
-$link = "https://github.com/Equicord/Equilotl/releases/latest/download/EquilotlCli.exe"
+$link = "https://github.com/Slipcords/Slipped/releases/latest/download/SlippedCli.exe"
 
-$outfile = "$env:TEMP\EquilotlCli.exe"
+$outfile = "$env:TEMP\SlippedCli.exe"
 
 Write-Output "Downloading installer to $outfile"
 
