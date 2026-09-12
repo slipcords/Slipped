@@ -82,7 +82,7 @@ func main() {
 		os.Setenv("GDK_DPI_SCALE", "1")
 	}
 
-	win = g.NewMasterWindow("Slipped", 1200, 800, linuxFlags)
+	win = g.NewMasterWindow("Slipped", 1280, 920, linuxFlags)
 
 	icon, _, err := image.Decode(bytes.NewReader(iconBytes))
 	if err != nil {
@@ -219,8 +219,8 @@ func RawInfoModal(id, title, description string, isOpenAsar bool) g.Widget {
 		flags |= g.WindowFlagsAlwaysAutoResize
 	}
 	return g.Style().
-		SetStyle(g.StyleVarWindowPadding, 30, 30).
-		SetStyleFloat(g.StyleVarWindowRounding, 12).
+		SetStyle(g.StyleVarWindowPadding, 32, 32).
+		SetStyleFloat(g.StyleVarWindowRounding, 22).
 		To(
 			g.PopupModal(id).
 				Flags(flags).
@@ -276,8 +276,8 @@ func RawInfoModal(id, title, description string, isOpenAsar bool) g.Widget {
 
 func UpdateModal() g.Widget {
 	return g.Style().
-		SetStyle(g.StyleVarWindowPadding, 30, 30).
-		SetStyleFloat(g.StyleVarWindowRounding, 12).
+		SetStyle(g.StyleVarWindowPadding, 32, 32).
+		SetStyleFloat(g.StyleVarWindowRounding, 22).
 		To(
 			g.PopupModal("#update-prompt").
 				Flags(g.WindowFlagsNoTitleBar | g.WindowFlagsAlwaysAutoResize).
@@ -374,7 +374,7 @@ const (
 	jobOpenAsar
 )
 
-const stageW = 560
+const stageW = 620
 
 var (
 	page      = pgWelcome
@@ -584,16 +584,16 @@ func welcomePage(wh int) g.Widget {
 
 func pathPage(wh int) g.Widget {
 	rows := len(discords) + 1
-	estH := float32(300 + rows*76)
+	estH := float32(340 + rows*88)
 
 	var col g.Layout
 	col = append(col,
 		pips(1, 5),
-		g.Dummy(0, 6),
-		boldText(34, colourInk, "Pick a Discord to patch"),
-		g.Dummy(0, 6),
-		textCW(16, colourMuted, "Found on this machine — or point at a folder yourself."),
-		g.Dummy(0, 18),
+		g.Dummy(0, 8),
+		boldText(38, colourInk, "Pick a Discord to patch"),
+		g.Dummy(0, 8),
+		textCW(17, colourMuted, "Found on this machine — or point at a folder yourself."),
+		g.Dummy(0, 22),
 	)
 
 	for i, v := range discords {
@@ -606,7 +606,7 @@ func pathPage(wh int) g.Widget {
 	}
 	col = append(col,
 		installOptionRow("Custom Install Location", customPath, false, radioIdx == customChoiceIdx, makeRadioOnChange(customChoiceIdx)),
-		g.Dummy(0, 12),
+		g.Dummy(0, 14),
 		inputBoxStyle().To(
 			g.InputText(&customDir).Hint("Other location — e.g. C:\\Users\\you\\AppData\\Local\\Discord").
 				Flags(g.InputTextFlagsCallbackCompletion).
@@ -661,37 +661,40 @@ func actionPage(wh int) g.Widget {
 	var col g.Layout
 	col = append(col,
 		pips(2, 5),
-		g.Dummy(0, 6),
-		boldText(34, colourInk, "What should I do?"),
-		g.Dummy(0, 6),
-		textCW(16, colourMuted, "Heads up: fully close Discord first, or Windows may refuse to touch its files."),
-		g.Dummy(0, 16),
-		boldText(14, colourFaint, "target: "+chosenLabel()),
-		g.Dummy(0, 14),
-		goldButton("Install Slipcord", 0, 58, func() { startJob(jobInstall) }),
-		g.Dummy(0, 6),
-		textC(13, colourFaint, "sync the latest Slipcord and slip it in"),
-		g.Dummy(0, 12),
-		goldButton("Repair or reinstall", 0, 58, func() { startJob(jobRepair) }),
-		g.Dummy(0, 6),
-		textC(13, colourFaint, "re-download Slipcord and patch it over whatever is there"),
-		g.Dummy(0, 12),
-		ghostButton("Remove Slipcord", 0, 58, func() { startJob(jobUninstall) }),
-		g.Dummy(0, 6),
-		textC(13, colourFaint, "restore the official Discord app"),
-		g.Dummy(0, 12),
-		ghostButton("Manage OpenAsar", 0, 58, func() { startJob(jobOpenAsar) }),
-		g.Dummy(0, 6),
-		textC(13, colourFaint, "an open-source replacement for Discord's core"),
+		g.Dummy(0, 8),
+		boldText(38, colourInk, "What should I do?"),
+		g.Dummy(0, 8),
+		textCW(17, colourMuted, "Heads up: fully close Discord first, or Windows may refuse to touch its files."),
 		g.Dummy(0, 18),
-		ghostButton("Back", 120, 50, func() { switchPage(pgPath) }),
+		boldText(15, colourFaint, "target: "+chosenLabel()),
+		g.Dummy(0, 18),
+		goldButton("Install Slipcord", 0, 60, func() { startJob(jobInstall) }),
+		g.Dummy(0, 6),
+		textC(14, colourFaint, "sync the latest Slipcord and slip it in"),
+		g.Dummy(0, 14),
+		goldButton("Repair or reinstall", 0, 60, func() { startJob(jobRepair) }),
+		g.Dummy(0, 6),
+		textC(14, colourFaint, "re-download Slipcord and patch it over whatever is there"),
+		g.Dummy(0, 14),
+		ghostButton("Remove Slipcord", 0, 60, func() { startJob(jobUninstall) }),
+		g.Dummy(0, 6),
+		textC(14, colourFaint, "restore the official Discord app"),
+		g.Dummy(0, 14),
+		ghostButton("Manage OpenAsar", 0, 60, func() { startJob(jobOpenAsar) }),
+		g.Dummy(0, 6),
+		textC(14, colourFaint, "an open-source replacement for Discord's core"),
+		g.Dummy(0, 22),
+		ghostButton("Back", 132, 52, func() { switchPage(pgPath) }),
 	)
-	return stagePage(wh, 640, col...)
+	return stagePage(wh, 760, col...)
 }
 
 func stagePage(wh int, estH float32, content ...g.Widget) g.Widget {
 	ww, _ := win.GetSize()
-	stageY := int(float32(wh)*0.13) + int(curRise)
+	stageY := int(float32(wh)*0.11) + int(curRise)
+	if maxH := float32(wh) - float32(stageY) - 64; estH > maxH {
+		estH = maxH
+	}
 	return g.Custom(func() {
 		g.SetCursorPos(image.Pt((ww-stageW)/2, stageY))
 		stageCard(stageW, estH, content...).Build()
@@ -702,17 +705,17 @@ func installOptionRow(name, installPath string, patched, selected bool, onClick 
 	return g.Custom(func() {
 		availW, _ := g.GetAvailableRegion()
 		selectionStyle(selected).
-			SetStyle(g.StyleVarFramePadding, 14, 10).
-			SetStyleFloat(g.StyleVarFrameRounding, 12).
-			To(g.Selectable(name).Selected(selected).Size(availW-28, 46).OnClick(onClick)).
+			SetStyle(g.StyleVarFramePadding, 18, 14).
+			SetStyleFloat(g.StyleVarFrameRounding, 16).
+			To(g.Selectable(name).Selected(selected).Size(availW-28, 56).OnClick(onClick)).
 			Build()
-		g.Dummy(0, 5).Build()
-		row := []g.Widget{mutedText(13, installPath)}
+		g.Dummy(0, 6).Build()
+		row := []g.Widget{mutedText(14, installPath)}
 		if patched {
 			row = append(row, g.Dummy(10, 0), textC(13, colourSuccess, "patched"))
 		}
 		g.Row(row...).Build()
-		g.Dummy(0, 12).Build()
+		g.Dummy(0, 14).Build()
 	})
 }
 
@@ -728,28 +731,28 @@ func progressPage(wh int) g.Widget {
 	var col g.Layout
 	col = append(col,
 		pips(3, 5),
-		g.Dummy(0, 6),
-		boldText(34, titleCol, title),
-		g.Dummy(0, 6),
-		textCW(16, colourMuted, desc),
+		g.Dummy(0, 8),
+		boldText(38, titleCol, title),
+		g.Dummy(0, 8),
+		textCW(17, colourMuted, desc),
 		g.Dummy(0, 30),
-		cometBar(frac, 492, 18),
-		g.Dummy(0, 18),
+		cometBar(frac, 540, 18),
+		g.Dummy(0, 20),
 	)
-	estH := float32(300)
+	estH := float32(380)
 	if failed {
-		estH = 430
+		estH = 500
 		col = append(col,
 			textCW(15, colourDanger, humanizeErr(jobDi, jobErr)),
-			g.Dummy(0, 22),
-			ghostButton("Back", 120, 48, func() { switchPage(pgAction) }),
+			g.Dummy(0, 24),
+			ghostButton("Back", 132, 48, func() { switchPage(pgAction) }),
 		)
 	} else {
 		foot := "your files stay on this device"
 		if time.Since(jobStartedAt) > 9*time.Second {
 			foot = "taking a little longer than usual — still working"
 		}
-		col = append(col, textC(13, colourFaint, foot))
+		col = append(col, textC(14, colourFaint, foot))
 	}
 	return stagePage(wh, estH, col...)
 }

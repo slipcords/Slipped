@@ -122,7 +122,7 @@ func goldButton(label string, w, h float32, onClick func()) g.Widget {
 		SetColor(g.StyleColorButtonActive, rgba(colourGoldDeep, curAlpha)).
 		SetColor(g.StyleColorText, rgba(colourSky, 1)).
 		SetStyle(g.StyleVarFramePadding, 0, 0).
-		SetStyleFloat(g.StyleVarFrameRounding, 12)
+		SetStyleFloat(g.StyleVarFrameRounding, 16)
 	return g.Custom(func() {
 		if w <= 0 {
 			aw, _ := g.GetAvailableRegion()
@@ -139,7 +139,7 @@ func ghostButton(label string, w, h float32, onClick func()) g.Widget {
 		SetColor(g.StyleColorButtonActive, rgba(colourGoldDeep, curAlpha)).
 		SetColor(g.StyleColorText, rgba(colourInk, curAlpha)).
 		SetStyle(g.StyleVarFramePadding, 0, 0).
-		SetStyleFloat(g.StyleVarFrameRounding, 12)
+		SetStyleFloat(g.StyleVarFrameRounding, 16)
 	return g.Custom(func() {
 		if w <= 0 {
 			aw, _ := g.GetAvailableRegion()
@@ -157,7 +157,7 @@ func cardButton(label, tip string, w, h float32, onClick func()) g.Widget {
 		SetColor(g.StyleColorButtonActive, rgba(colourGoldDeep, curAlpha)).
 		SetColor(g.StyleColorText, rgba(colourInk, curAlpha)).
 		SetStyle(g.StyleVarFramePadding, 0, 0).
-		SetStyleFloat(g.StyleVarFrameRounding, 14).
+		SetStyleFloat(g.StyleVarFrameRounding, 18).
 		SetStyle(g.StyleVarButtonTextAlign, 0.06, 0.5).
 		To(g.Button(label).OnClick(onClick).Size(w, h))
 	if tip == "" {
@@ -171,8 +171,8 @@ func inputBoxStyle() *g.StyleSetter {
 		SetColor(g.StyleColorFrameBg, rgba(colourWell, curAlpha)).
 		SetColor(g.StyleColorFrameBgHovered, rgba(colourWellHover, curAlpha)).
 		SetColor(g.StyleColorFrameBgActive, rgba(colourWellHover, curAlpha)).
-		SetStyle(g.StyleVarFramePadding, 14, 12).
-		SetStyleFloat(g.StyleVarFrameRounding, 10)
+		SetStyle(g.StyleVarFramePadding, 16, 14).
+		SetStyleFloat(g.StyleVarFrameRounding, 14)
 }
 
 func selectionStyle(selected bool) *g.StyleSetter {
@@ -193,9 +193,9 @@ func stageCard(w, h float32, layout ...g.Widget) g.Widget {
 	return g.Style().
 		SetColor(g.StyleColorChildBg, rgba(colourSurface, curAlpha)).
 		SetColor(g.StyleColorBorder, rgba(colourRail, curAlpha)).
-		SetStyle(g.StyleVarWindowPadding, 34, 30).
-		SetStyleFloat(g.StyleVarChildBorderSize, 1).
-		SetStyleFloat(g.StyleVarChildRounding, 18).
+		SetStyle(g.StyleVarWindowPadding, 40, 36).
+		SetStyleFloat(g.StyleVarChildBorderSize, 1.2).
+		SetStyleFloat(g.StyleVarChildRounding, 26).
 		To(g.Child().Border(true).Size(w, h).Layout(g.Column(layout...)))
 }
 
