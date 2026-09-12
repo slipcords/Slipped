@@ -13,19 +13,20 @@ import (
 	_ "embed"
 	"errors"
 	"image"
-	"image/color"
-	"slipped/buildinfo"
-
-	g "github.com/AllenDang/giu"
-	"github.com/AllenDang/imgui-go"
-
-	// png decoder for icon
 	_ "image/png"
+	"math"
 	"os"
 	path "path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
+
+	"slipped/buildinfo"
+
+	g "github.com/AllenDang/giu"
+	"github.com/AllenDang/imgui-go"
 )
 
 var (
@@ -82,6 +83,7 @@ func main() {
 	}
 
 	win = g.NewMasterWindow("Slipped", 1200, 800, linuxFlags)
+	initIconTexture()
 
 	icon, _, err := image.Decode(bytes.NewReader(iconBytes))
 	if err != nil {
@@ -135,94 +137,8 @@ func InstallLatestBuilds() (err error) {
 	return
 }
 
-func handlePatch() {
-	choice := getChosenInstall()
-	if choice != nil {
-		choice.Patch()
-	}
-}
-
-func handleUnpatch() {
-	choice := getChosenInstall()
-	if choice != nil {
-		choice.Unpatch()
-	}
-}
-
-func handleOpenAsar() {
-	if acceptedOpenAsar || getChosenInstall().IsOpenAsar() {
-		handleOpenAsarConfirmed()
-		return
-	}
-
-	g.OpenPopup("#openasar-confirm")
-}
-
-func handleOpenAsarConfirmed() {
-	choice := getChosenInstall()
-	if choice != nil {
-		if choice.IsOpenAsar() {
-			if err := choice.UninstallOpenAsar(); err != nil {
-				handleErr(choice, err, "uninstall OpenAsar from")
-			} else {
-				g.OpenPopup("#openasar-unpatched")
-				g.Update()
-			}
-		} else {
-			if err := choice.InstallOpenAsar(); err != nil {
-				handleErr(choice, err, "install OpenAsar on")
-			} else {
-				g.OpenPopup("#openasar-patched")
-				g.Update()
-			}
-		}
-	}
-}
-
-func handleErr(di *DiscordInstall, err error, action string) {
-	if errors.Is(err, ErrAlreadyReported) {
-		return
-	}
-	if errors.Is(err, os.ErrPermission) {
-		switch runtime.GOOS {
-		case "windows":
-			err = errors.New("Permission denied. Make sure your Discord is fully closed (from the tray)!")
-		case "darwin":
-			// FIXME: This text is not selectable which is a bit mehhh
-			command := "sudo chown -R \"${USER}:wheel\" " + di.path
-			err = errors.New("Permission denied. Please grant the installer Full Disk Access in the system settings (privacy & security page).\n\nIf that also doesn't work, try running the following command in your terminal:\n" + command)
-		case "linux":
-			command := "sudo chown -R \"$USER:$USER\" " + di.path
-			err = errors.New("Permission denied. Try to run the installer with sudo privileges.\n\nIf that also doesn't work, try running the following command in your terminal:\n" + command)
-		default:
-			err = errors.New("Permission denied. Maybe try running me as Administrator/Root?")
-		}
-	}
-
-	ShowModal("Failed to "+action+" this Install", err.Error())
-}
-
 func HandleScuffedInstall() {
 	g.OpenPopup("#scuffed-install")
-}
-
-func (di *DiscordInstall) Patch() {
-	if CheckScuffedInstall() {
-		return
-	}
-	if err := di.patch(); err != nil {
-		handleErr(di, err, "patch")
-	} else {
-		g.OpenPopup("#patched")
-	}
-}
-
-func (di *DiscordInstall) Unpatch() {
-	if err := di.unpatch(); err != nil {
-		handleErr(di, err, "unpatch")
-	} else {
-		g.OpenPopup("#unpatched")
-	}
 }
 
 func onCustomInputChanged() {
@@ -265,10 +181,6 @@ func onCustomInputChanged() {
 	didAutoComplete = false
 }
 
-// go can you give me []any?
-// to pass to giu RangeBuilder?
-// yeeeeees
-// actually returns []string like a boss
 func makeAutoComplete() []any {
 	input := strings.ToLower(autoCompleteFile)
 
@@ -303,12 +215,16 @@ func InfoModal(id, title, description string) g.Widget {
 
 func RawInfoModal(id, title, description string, isOpenAsar bool) g.Widget {
 	isDynamic := strings.HasPrefix(id, "#modal") && !strings.Contains(description, "\n")
+	flags := g.WindowFlagsNoTitleBar
+	if isDynamic {
+		flags |= g.WindowFlagsAlwaysAutoResize
+	}
 	return g.Style().
 		SetStyle(g.StyleVarWindowPadding, 30, 30).
 		SetStyleFloat(g.StyleVarWindowRounding, 12).
 		To(
 			g.PopupModal(id).
-				Flags(g.WindowFlagsNoTitleBar | Ternary(isDynamic, g.WindowFlagsAlwaysAutoResize, 0)).
+				Flags(flags).
 				Layout(
 					g.Align(g.AlignCenter).To(
 						g.Style().SetFontSize(30).To(
@@ -336,6 +252,7 @@ func RawInfoModal(id, title, description string, isOpenAsar bool) g.Widget {
 										OnClick(func() {
 											acceptedOpenAsar = true
 											g.CloseCurrentPopup()
+											startJob(jobOpenAsar)
 										}).
 										Size(100, 30),
 									g.Button("Cancel").
@@ -418,265 +335,194 @@ func ShowModal(title, desc string) {
 	g.OpenPopup("#modal" + strconv.Itoa(modalId))
 }
 
-// renderHeader draws the brand lockup (wordmark + tagline) and, right-aligned,
-// the installer version with an outdated notice when one is available.
-func renderHeader() g.Widget {
-	var rightMeta g.Widget = mutedText(14, "Installer "+buildinfo.InstallerTag+" ("+buildinfo.InstallerGitHash+")")
-	if IsSelfOutdated {
-		rightMeta = g.Column(
-			rightMeta,
-			g.Style().SetFontSize(13).SetColor(g.StyleColorText, colourWarning).
-				To(g.Label("A new installer version is available")),
-		)
+// humanizeErr turns a raw error into a message that tells the user what to do.
+func humanizeErr(di *DiscordInstall, err error) string {
+	if errors.Is(err, os.ErrPermission) {
+		switch runtime.GOOS {
+		case "windows":
+			return "Permission denied. Make sure your Discord is fully closed (from the tray)!"
+		case "darwin":
+			command := "sudo chown -R \"${USER}:wheel\" " + di.path
+			return "Permission denied. Please grant the installer Full Disk Access in the system settings (privacy & security page).\n\nIf that also doesn't work, try running the following command in your terminal:\n" + command
+		case "linux":
+			command := "sudo chown -R \"$USER:$USER\" " + di.path
+			return "Permission denied. Try to run the installer with sudo privileges.\n\nIf that also doesn't work, try running the following command in your terminal:\n" + command
+		default:
+			return "Permission denied. Maybe try running me as Administrator/Root?"
+		}
 	}
-
-	return g.Row(
-		g.Column(
-			boldText(38, "Slipped"),
-			g.Style().SetFontSize(14).SetColor(g.StyleColorText, colourMuted).
-				To(g.Label("the Slipcord installer")),
-		),
-		g.Align(g.AlignRight).To(rightMeta),
-	)
+	return err.Error()
 }
 
-// renderSecurityBanner replaces the old full-bleed yellow warning with a calm,
-// hairline amber card that carries the same message without shouting.
-func renderSecurityBanner(width float32) g.Widget {
-	msg := "Only **GitHub** and **github.com/Slipcords/Slipped** are the official places to get Slipcord. Any other site claiming to be us is malicious.\n" +
-		"If you downloaded from any other source, delete or uninstall everything from it immediately, run a malware scan, and change your Discord password."
-	return g.Style().
-		SetColor(g.StyleColorChildBg, colourWarningDim).
-		SetColor(g.StyleColorBorder, colourWarning).
-		SetStyle(g.StyleVarWindowPadding, 18, 14).
-		SetStyleFloat(g.StyleVarChildBorderSize, 1).
-		SetStyleFloat(g.StyleVarChildRounding, 10).
-		To(
-			g.Child().Border(true).Size(width, 98).Layout(
-				g.Column(
-					g.Style().SetFont(sliptFontBold).SetFontSize(15).SetColor(g.StyleColorText, colourWarning).
-						To(g.Label("Security notice")),
-					g.Dummy(0, 4),
-					g.Markdown(&msg),
-				),
-			),
-		)
+// ---- wizard: five steps, one stage, a starfield behind it ----
+
+type wizardPage int
+
+const (
+	pgWelcome wizardPage = iota
+	pgPath
+	pgAction
+	pgProgress
+	pgDone
+)
+
+type jobKind int
+
+const (
+	jobInstall jobKind = iota
+	jobRepair
+	jobUninstall
+	jobOpenAsar
+)
+
+const stageW = 560
+
+var (
+	page      = pgWelcome
+	pageT     time.Time
+	welcomeAt time.Time
+
+	jobKindNow     jobKind
+	jobBranch      string
+	jobTarget      string
+	jobWasOpenAsar bool
+	jobDi          *DiscordInstall
+	jobDone        atomic.Int32
+	jobErr         error
+	jobStartedAt   time.Time
+	jobDoneSeenAt  time.Time
+)
+
+func switchPage(p wizardPage) {
+	page = p
+	pageT = time.Now()
+	if p == pgWelcome {
+		welcomeAt = time.Now()
+	}
 }
 
-// installOptionRow is one selectable target: a blurple-highlighted headline row
-// with a success-coloured badge and the install path underneath.
-func installOptionRow(name, installPath string, patched, selected bool, onClick func()) g.Widget {
-	return g.Custom(func() {
-		availW, _ := g.GetAvailableRegion()
-		headlineStyle := selectionStyle(selected).
-			SetStyle(g.StyleVarFramePadding, 14, 10).
-			SetStyleFloat(g.StyleVarFrameRounding, 8)
+func pageAnim() (alpha, rise float32) {
+	el := float32(time.Since(pageT).Seconds())
+	k := clamp01(el / 0.42)
+	s := k * k * (3 - 2*k)
+	return s, (1 - s) * 22
+}
 
-		if patched {
-			g.Row(
-				headlineStyle.To(
-					g.Selectable(name).Selected(selected).Size(availW-84, 0).OnClick(onClick),
-				),
-				g.Style().SetFontSize(13).SetColor(g.StyleColorText, colourSuccess).
-					To(g.Label("PATCHED")),
-			).Build()
+func startJob(k jobKind) {
+	choice := getChosenInstall()
+	if choice == nil {
+		g.OpenPopup("#invalid-custom-location")
+		return
+	}
+	if k == jobOpenAsar && !acceptedOpenAsar && !choice.IsOpenAsar() {
+		g.OpenPopup("#openasar-confirm")
+		return
+	}
+	jobKindNow = k
+	jobBranch = choice.branch
+	jobTarget = choice.path
+	jobWasOpenAsar = choice.IsOpenAsar()
+	jobDi = choice
+	jobErr = nil
+	jobDone.Store(0)
+	jobDoneSeenAt = time.Time{}
+	jobStartedAt = time.Now()
+	switchPage(pgProgress)
+	go runJob(choice)
+}
+
+func runJob(d *DiscordInstall) {
+	record := func(e error) {
+		if e != nil && !errors.Is(e, ErrAlreadyReported) {
+			jobErr = e
+		}
+	}
+	switch jobKindNow {
+	case jobInstall:
+		if CheckScuffedInstall() {
+			jobErr = errors.New("Your Discord install looks broken — it ended up somewhere Discord doesn't expect. Fully quit Discord, delete the Discord and Squirrel folders next to it, reinstall Discord, then come back here.")
 		} else {
-			headlineStyle.To(
-				g.Selectable(name).Selected(selected).Size(availW, 0).OnClick(onClick),
-			).Build()
+			record(d.patch())
 		}
-
-		g.Dummy(0, 3).Build()
-		mutedText(13, installPath).Build()
-		g.Dummy(0, 4).Build()
-	})
-}
-
-func metaLine(key, value string, warn bool) g.Widget {
-	return g.Row(
-		mutedText(14, key),
-		g.Dummy(10, 0),
-		g.Style().
-			SetFontSize(14).
-			SetColor(g.StyleColorText, Ternary(warn, colourWarning, colourText)).
-			To(g.Label(value)),
-	)
-}
-
-func renderInstaller() g.Widget {
-	candidates := makeAutoComplete()
-	if len(candidates) > 6 {
-		candidates = candidates[:6]
-	}
-	wi, hi := win.GetSize()
-	w := float32(wi) - 80
-	contentH := float32(hi) - 60
-
-	mainH := contentH - 280
-	if mainH < 220 {
-		mainH = 220
-	}
-
-	var currentDiscord *DiscordInstall
-	if radioIdx != customChoiceIdx {
-		currentDiscord = discords[radioIdx].(*DiscordInstall)
-	}
-	var isOpenAsar = currentDiscord != nil && currentDiscord.IsOpenAsar()
-
-	if CanUpdateSelf() && !showedUpdatePrompt {
-		showedUpdatePrompt = true
-		g.OpenPopup("#update-prompt")
-	}
-
-	// left pane: install targets
-	var leftCol g.Layout
-	if len(discords) == 0 {
-		s := "No Discord installs found. You first need to install Discord."
-		if runtime.GOOS == "linux" {
-			s += " snap is not supported."
-		}
-		leftCol = append(leftCol, mutedText(15, s))
-	}
-	for i, v := range discords {
-		d := v.(*DiscordInstall)
-		leftCol = append(leftCol, installOptionRow(strings.Title(d.branch), d.path, d.isPatched, radioIdx == i, makeRadioOnChange(i)))
-	}
-	leftCol = append(leftCol,
-		installOptionRow("Custom Install Location", Ternary(customDir != "", customDir, "Select a folder"), false, radioIdx == customChoiceIdx, makeRadioOnChange(customChoiceIdx)),
-		g.Dummy(0, 6),
-		inputBoxStyle().To(
-			g.InputText(&customDir).Hint("The custom location").
-				Flags(g.InputTextFlagsCallbackCompletion).
-				OnChange(onCustomInputChanged).
-				// this library has its own autocomplete but it's broken
-				Callback(
-					func(data imgui.InputTextCallbackData) int32 {
-						if len(candidates) == 0 {
-							return 0
-						}
-						// just wrap around
-						if autoCompleteIdx >= len(candidates) {
-							autoCompleteIdx = 0
-						}
-
-						// used by change handler
-						didAutoComplete = true
-
-						start := len(customDir)
-						// Delete previous auto complete
-						if lastAutoComplete != "" {
-							start -= len(lastAutoComplete)
-							data.DeleteBytes(start, len(lastAutoComplete))
-						} else if autoCompleteFile != "" { // delete partial input
-							start -= len(autoCompleteFile)
-							data.DeleteBytes(start, len(autoCompleteFile))
-						}
-
-						// Insert auto complete
-						lastAutoComplete = candidates[autoCompleteIdx].(string)
-						data.InsertBytes(start, []byte(lastAutoComplete))
-						autoCompleteIdx++
-
-						return 0
-					},
-				),
-		),
-	)
-	for _, c := range candidates {
-		leftCol = append(leftCol, mutedText(13, c.(string)))
-	}
-
-	// right pane: status
-	dirLine := "Slipcord will be downloaded to:"
-	if IsDevInstall {
-		dirLine = "Dev Install:"
-	}
-	var rightCol g.Layout
-	rightCol = append(rightCol,
-		sectionTitle("Status"),
-		g.Dummy(0, 10),
-		g.Style().SetFontSize(16).To(g.Label(dirLine)),
-		g.Style().SetFontSize(16).To(g.Label(SlipcordDirectory).Wrapped(true)),
-		g.Dummy(0, 10),
-		g.Style().
-			SetColor(g.StyleColorButton, colourSurfaceAlt).
-			SetColor(g.StyleColorButtonHovered, colourSurfaceHover).
-			SetColor(g.StyleColorButtonActive, colourSurfaceAlt).
-			SetStyle(g.StyleVarFramePadding, 12, 8).
-			SetStyleFloat(g.StyleVarFrameRounding, 8).
-			To(
-				g.Button("Open Directory").OnClick(func() {
-					g.OpenURL("file://" + path.Dir(SlipcordDirectory))
-				}).Size(150, 32),
-			),
-		&CondWidget{!IsDevInstall, func() g.Widget {
-			return g.Style().SetFontSize(13).SetColor(g.StyleColorText, colourMuted).To(
-				g.Label("To customise this location, set the environment variable 'SLIPCORD_USER_DATA_DIR' and restart me").Wrapped(true),
-			)
-		}, nil},
-		g.Dummy(0, 14),
-		g.Style().SetColor(g.StyleColorSeparator, colourLine).To(g.Separator()),
-		g.Dummy(0, 8),
-		metaLine("Installer", buildinfo.InstallerTag+" ("+buildinfo.InstallerGitHash+")", IsSelfOutdated),
-		metaLine("Local Slipcord", Ternary(InstalledHash == "", "None", shortHash(InstalledHash)), false),
-		&CondWidget{
-			GithubError == nil,
-			func() g.Widget {
-				if IsDevInstall {
-					return metaLine("Latest", "not updating (DevMode)", false)
-				}
-				return metaLine("Latest Slipcord", shortHash(LatestHash), false)
-			}, func() g.Widget {
-				return renderErrorCard(DiscordRed, "Failed to fetch Info from GitHub: "+GithubError.Error(), 40)
-			},
-		},
-	)
-
-	mainRow := g.Row(
-		paneCard(w*0.60, mainH, leftCol...),
-		g.Dummy(12, 0),
-		paneCard(w*0.38, mainH, rightCol...),
-	)
-
-	bw := (w - 36) / 4
-	openAsarBg := colourSuccess
-	openAsarHover := colourSuccessHover
-	openAsarActive := colourSuccessDim
-	if isOpenAsar {
-		openAsarBg = colourDanger
-		openAsarHover = colourDangerHover
-		openAsarActive = colourDangerDk
-	}
-	actionBar := g.Row(
-		actionButton("Install", colourAccent, colourAccentHover, colourAccentDim, "Patch the selected Discord Install", GithubError != nil, bw, 46, handlePatch),
-		actionButton("Reinstall / Repair", colourSurfaceAlt, colourSurfaceHover, colourSurfaceAlt, "Reinstall & Update Slipcord", GithubError != nil, bw, 46, func() {
-			if IsDevInstall {
-				handlePatch()
+	case jobRepair:
+		if IsDevInstall {
+			record(d.patch())
+		} else {
+			if e := installLatestBuilds(); e == nil {
+				record(d.patch())
 			} else {
-				err := InstallLatestBuilds()
-				if err == nil {
-					handlePatch()
-				}
+				jobErr = e
 			}
+		}
+	case jobUninstall:
+		jobErr = d.unpatch()
+	case jobOpenAsar:
+		if d.IsOpenAsar() {
+			jobErr = d.UninstallOpenAsar()
+		} else {
+			jobErr = d.InstallOpenAsar()
+		}
+	}
+	jobDone.Store(1)
+	g.Update()
+}
+
+func progressFrac() float32 {
+	if jobDone.Load() == 1 {
+		return 1
+	}
+	el := float32(time.Since(jobStartedAt).Seconds())
+	return float32(math.Min(float64(el/2.4), 0.9))
+}
+
+func jobTexts() (title, desc, done string) {
+	switch jobKindNow {
+	case jobInstall:
+		return "Slipping Slipcord in…",
+			"Patching the Discord in place. Nothing here touches anything else on your machine.",
+			"Slipcord is in. Fully close Discord, then open it again — you'll find Slipcord under Settings."
+	case jobRepair:
+		return "Repairing Slipcord…",
+			"Fetching the freshest Slipcord build, then patching it back in.",
+			"Repaired — " + jobBranch + " is patched with the latest Slipcord build."
+	case jobUninstall:
+		return "Removing Slipcord…",
+			"Giving " + jobBranch + " back its official app.asar.",
+			"Slipcord is out of " + jobBranch + ". Discord is back to the official app."
+	default:
+		if jobWasOpenAsar {
+			return "Working on OpenAsar…",
+				"Swapping " + jobBranch + "'s core back to Discord's official app.",
+				"OpenAsar was taken off " + jobBranch + "."
+		}
+		return "Working on OpenAsar…",
+			"Swapping " + jobBranch + "'s core with the community OpenAsar.",
+			"OpenAsar is now running on " + jobBranch + "."
+	}
+}
+
+func chosenLabel() string {
+	if radioIdx == customChoiceIdx {
+		return "custom location"
+	}
+	if radioIdx >= 0 && radioIdx < len(discords) {
+		return strings.Title(discords[radioIdx].(*DiscordInstall).branch)
+	}
+	return "?"
+}
+
+// ---- page building ----
+
+func wizardLayout() g.Layout {
+	ww, wh := win.GetSize()
+	layout := g.Layout{
+		g.Custom(func() {
+			drawSky(ww, wh, g.GetCursorScreenPos(), g.GetCanvas())
 		}),
-		actionButton("Uninstall", colourDanger, colourDangerHover, colourDangerDk, "Unpatch the selected Discord Install", false, bw, 46, handleUnpatch),
-		actionButton(Ternary(isOpenAsar, "Uninstall OpenAsar", Ternary(currentDiscord != nil, "Install OpenAsar", "(Un-)Install OpenAsar")), openAsarBg, openAsarHover, openAsarActive, "Manage OpenAsar", false, bw, 46, handleOpenAsar),
-	)
-
-	return g.Layout{
-		renderHeader(),
-		g.Dummy(0, 8),
-		g.Style().SetColor(g.StyleColorSeparator, colourLine).To(g.Separator()),
-		g.Dummy(0, 16),
-		renderSecurityBanner(w),
-		g.Dummy(0, 16),
-		mainRow,
-		g.Dummy(0, 14),
-		actionBar,
-
-		InfoModal("#patched", "Successfully Patched", "If Discord is still open, fully close it first.\n"+
-			"Then, start it and verify Slipcord installed successfully by looking for its category in Discord Settings"),
-		InfoModal("#unpatched", "Successfully Unpatched", "If Discord is still open, fully close it first. Then start it again, it should be back to stock!"),
+		pageContent(ww, wh),
+		footer(wh),
+	}
+	layout = append(layout,
 		InfoModal("#scuffed-install", "Hold On!", "You have a broken Discord Install.\n"+
 			"Sometimes Discord decides to install to the wrong location for some reason!\n"+
 			"You need to fix this before patching, otherwise Slipcord will likely not work.\n\n"+
@@ -687,51 +533,283 @@ func renderInstaller() g.Widget {
 			"Slipcord is in no way affiliated with OpenAsar.\n"+
 			"You're installing OpenAsar at your own risk. If you run into issues with OpenAsar,\n"+
 			"no support will be provided, join the OpenAsar Server instead!\n\n"+
-			"To install OpenAsar, press Accept and click 'Install OpenAsar' again.", true),
-		InfoModal("#openasar-patched", "Successfully Installed OpenAsar", "If Discord is still open, fully close it first. Then start it again and verify OpenAsar installed successfully!"),
-		InfoModal("#openasar-unpatched", "Successfully Uninstalled OpenAsar", "If Discord is still open, fully close it first. Then start it again and it should be back to stock!"),
+			"To install OpenAsar, press Accept and it gets installed right away.", true),
 		InfoModal("#invalid-custom-location", "Invalid Location", "The specified location is not a valid Discord install.\nMake sure you select the base folder.\n\nHint: Discord snap is not supported. use flatpak or .deb"),
 		InfoModal("#modal"+strconv.Itoa(modalId), modalTitle, modalMessage),
-
 		UpdateModal(),
+	)
+	return layout
+}
+
+func pageContent(ww, wh int) g.Widget {
+	switch page {
+	case pgWelcome:
+		return welcomePage(wh)
+	case pgPath:
+		return pathPage(wh)
+	case pgAction:
+		return actionPage(wh)
+	case pgProgress:
+		return progressPage(wh)
+	default:
+		return donePage(wh)
 	}
 }
 
-func renderErrorCard(col color.Color, message string, height float32) g.Widget {
-	return g.Style().
-		SetColor(g.StyleColorChildBg, colourDangerDim).
-		SetColor(g.StyleColorBorder, col).
-		SetColor(g.StyleColorText, col).
-		SetStyle(g.StyleVarWindowPadding, 12, 10).
-		SetStyleFloat(g.StyleVarChildBorderSize, 1).
-		SetStyleFloat(g.StyleVarChildRounding, 10).
-		To(
-			g.Child().Border(true).Size(g.Auto, height).Layout(
-				g.Row(
-					g.Markdown(&message),
+func footer(wh int) g.Widget {
+	return g.Custom(func() {
+		g.SetCursorPos(image.Pt(26, wh-38))
+		mutedText(13, "Installer "+buildinfo.InstallerTag+" ("+shortHash(buildinfo.InstallerGitHash)+") — downloads stay on this device").Build()
+	})
+}
+
+func welcomePage(wh int) g.Widget {
+	return g.Custom(func() {
+		heroY := int(float32(wh)*0.185) + int(curRise)
+		g.SetCursorPos(image.Pt(0, heroY))
+		g.Align(g.AlignCenter).To(
+			logo(112),
+			g.Dummy(0, 24),
+			boldText(92, colourGold, "Slipped"),
+			g.Dummy(0, 8),
+			textC(20, colourInk, "the Slipcord installer"),
+			g.Dummy(0, 12),
+			textCW(14, colourMuted, "it slips cleanly into your Discord — no browser, no sketchy site"),
+			g.Dummy(0, 50),
+			pips(0, 5),
+			g.Dummy(0, 18),
+			textC(13, colourFaint, "moving on in a moment — or press enter"),
+		).Build()
+	})
+}
+
+func pathPage(wh int) g.Widget {
+	rows := len(discords) + 1
+	estH := float32(300 + rows*76)
+
+	var col g.Layout
+	col = append(col,
+		pips(1, 5),
+		g.Dummy(0, 6),
+		boldText(34, colourInk, "Pick a Discord to patch"),
+		g.Dummy(0, 6),
+		textCW(16, colourMuted, "Found on this machine — or point at a folder yourself."),
+		g.Dummy(0, 18),
+	)
+
+	for i, v := range discords {
+		d := v.(*DiscordInstall)
+		col = append(col, installOptionRow(strings.Title(d.branch), d.path, d.isPatched, radioIdx == i, makeRadioOnChange(i)))
+	}
+	customPath := "not set yet"
+	if customDir != "" {
+		customPath = customDir
+	}
+	col = append(col,
+		installOptionRow("Custom Install Location", customPath, false, radioIdx == customChoiceIdx, makeRadioOnChange(customChoiceIdx)),
+		g.Dummy(0, 12),
+		inputBoxStyle().To(
+			g.InputText(&customDir).Hint("Other location — e.g. C:\\Users\\you\\AppData\\Local\\Discord").
+				Flags(g.InputTextFlagsCallbackCompletion).
+				OnChange(onCustomInputChanged).
+				// this library has its own autocomplete but it's broken
+				Callback(
+					func(data imgui.InputTextCallbackData) int32 {
+						candidates := makeAutoComplete()
+						if len(candidates) == 0 {
+							return 0
+						}
+						if autoCompleteIdx >= len(candidates) {
+							autoCompleteIdx = 0
+						}
+						if didAutoComplete && lastAutoComplete != "" {
+							autoCompleteIdx++
+							if autoCompleteIdx >= len(candidates) {
+								autoCompleteIdx = 0
+							}
+						}
+						didAutoComplete = true
+						start := len(customDir)
+						if lastAutoComplete != "" {
+							start -= len(lastAutoComplete)
+							data.DeleteBytes(start, len(lastAutoComplete))
+						} else if autoCompleteFile != "" {
+							start -= len(autoCompleteFile)
+							data.DeleteBytes(start, len(autoCompleteFile))
+						}
+						lastAutoComplete = candidates[autoCompleteIdx].(string)
+						data.InsertBytes(start, []byte(lastAutoComplete))
+						return 0
+					},
 				),
-			),
+		),
+		g.Dummy(0, 20),
+		g.Row(
+			goldButton("Continue", 200, 52, func() {
+				if getChosenInstall() == nil {
+					return
+				}
+				switchPage(pgAction)
+			}),
+			g.Dummy(14, 0),
+			ghostButton("Back", 120, 52, func() { switchPage(pgWelcome) }),
+		),
+	)
+	return stagePage(wh, estH, col...)
+}
+
+func actionPage(wh int) g.Widget {
+	var col g.Layout
+	col = append(col,
+		pips(2, 5),
+		g.Dummy(0, 6),
+		boldText(34, colourInk, "What should I do?"),
+		g.Dummy(0, 6),
+		textCW(16, colourMuted, "Heads up: fully close Discord first, or Windows may refuse to touch its files."),
+		g.Dummy(0, 16),
+		boldText(14, colourFaint, "target: "+chosenLabel()),
+		g.Dummy(0, 14),
+		goldButton("Install Slipcord", 0, 58, func() { startJob(jobInstall) }),
+		g.Dummy(0, 6),
+		textC(13, colourFaint, "sync the latest Slipcord and slip it in"),
+		g.Dummy(0, 12),
+		goldButton("Repair or reinstall", 0, 58, func() { startJob(jobRepair) }),
+		g.Dummy(0, 6),
+		textC(13, colourFaint, "re-download Slipcord and patch it over whatever is there"),
+		g.Dummy(0, 12),
+		ghostButton("Remove Slipcord", 0, 58, func() { startJob(jobUninstall) }),
+		g.Dummy(0, 6),
+		textC(13, colourFaint, "restore the official Discord app"),
+		g.Dummy(0, 12),
+		ghostButton("Manage OpenAsar", 0, 58, func() { startJob(jobOpenAsar) }),
+		g.Dummy(0, 6),
+		textC(13, colourFaint, "an open-source replacement for Discord's core"),
+		g.Dummy(0, 18),
+		ghostButton("Back", 120, 50, func() { switchPage(pgPath) }),
+	)
+	return stagePage(wh, 640, col...)
+}
+
+func stagePage(wh int, estH float32, content ...g.Widget) g.Widget {
+	ww, _ := win.GetSize()
+	stageY := int(float32(wh)*0.13) + int(curRise)
+	return g.Custom(func() {
+		g.SetCursorPos(image.Pt((ww-stageW)/2, stageY))
+		stageCard(stageW, estH, content...).Build()
+	})
+}
+
+func installOptionRow(name, installPath string, patched, selected bool, onClick func()) g.Widget {
+	return g.Custom(func() {
+		availW, _ := g.GetAvailableRegion()
+		selectionStyle(selected).
+			SetStyle(g.StyleVarFramePadding, 14, 10).
+			SetStyleFloat(g.StyleVarFrameRounding, 12).
+			To(g.Selectable(name).Selected(selected).Size(availW-28, 46).OnClick(onClick)).
+			Build()
+		g.Dummy(0, 5).Build()
+		row := []g.Widget{mutedText(13, installPath)}
+		if patched {
+			row = append(row, g.Dummy(10, 0), textC(13, colourSuccess, "patched"))
+		}
+		g.Row(row...).Build()
+		g.Dummy(0, 12).Build()
+	})
+}
+
+func progressPage(wh int) g.Widget {
+	title, desc, _ := jobTexts()
+	frac := progressFrac()
+	failed := jobDone.Load() == 1 && jobErr != nil
+	titleCol := colourInk
+	if failed {
+		titleCol = colourDanger
+	}
+
+	var col g.Layout
+	col = append(col,
+		pips(3, 5),
+		g.Dummy(0, 6),
+		boldText(34, titleCol, title),
+		g.Dummy(0, 6),
+		textCW(16, colourMuted, desc),
+		g.Dummy(0, 30),
+		cometBar(frac, 492, 18),
+		g.Dummy(0, 18),
+	)
+	estH := float32(300)
+	if failed {
+		estH = 430
+		col = append(col,
+			textCW(15, colourDanger, humanizeErr(jobDi, jobErr)),
+			g.Dummy(0, 22),
+			ghostButton("Back", 120, 48, func() { switchPage(pgAction) }),
 		)
+	} else {
+		foot := "your files stay on this device"
+		if time.Since(jobStartedAt) > 9*time.Second {
+			foot = "taking a little longer than usual — still working"
+		}
+		col = append(col, textC(13, colourFaint, foot))
+	}
+	return stagePage(wh, estH, col...)
+}
+
+func donePage(wh int) g.Widget {
+	_, _, sub := jobTexts()
+	return g.Custom(func() {
+		heroY := int(float32(wh)*0.17) + int(curRise)
+		g.SetCursorPos(image.Pt(0, heroY))
+		g.Align(g.AlignCenter).To(
+			logo(104),
+			g.Dummy(0, 22),
+			boldText(44, colourGold, "Completed!"),
+			g.Dummy(0, 10),
+			textCW(18, colourInk, sub),
+			g.Dummy(0, 46),
+			pips(4, 5),
+			g.Dummy(0, 38),
+			g.Row(
+				goldButton("Install another target", 270, 54, func() { switchPage(pgPath) }),
+				g.Dummy(14, 0),
+				ghostButton("Close", 140, 54, func() { os.Exit(0) }),
+			),
+		).Build()
+	})
 }
 
 func loop() {
-	g.PushWindowPadding(40, 30)
-	g.PushColorWindowBg(colourBg)
+	wh := win.GetSize().Y
+	curAlpha, curRise = pageAnim()
+
+	if page == pgWelcome && time.Since(welcomeAt) > 4*time.Second {
+		switchPage(pgPath)
+	} else if page == pgProgress && (jobDone.Load() == 1 || jobErr != nil) {
+		if jobDoneSeenAt.IsZero() {
+			jobDoneSeenAt = time.Now()
+		} else if time.Since(jobDoneSeenAt) > 700*time.Millisecond {
+			switchPage(pgDone)
+		}
+	}
+
+	if page == pgWelcome && (g.IsKeyPressed(g.KeyEnter) || g.IsKeyPressed(g.KeySpace)) {
+		switchPage(pgPath)
+	}
+	if page == pgPath {
+		if g.IsKeyPressed(g.KeyUp) && radioIdx > 0 {
+			radioIdx--
+		}
+		if g.IsKeyPressed(g.KeyDown) && radioIdx < customChoiceIdx {
+			radioIdx++
+		}
+	}
+
+	g.PushWindowPadding(0, 0)
+	g.PushColorWindowBg(colourSky)
 
 	g.SingleWindow().
-		RegisterKeyboardShortcuts(
-			g.WindowShortcut{Key: g.KeyUp, Callback: func() {
-				if radioIdx > 0 {
-					radioIdx--
-				}
-			}},
-			g.WindowShortcut{Key: g.KeyDown, Callback: func() {
-				if radioIdx < customChoiceIdx {
-					radioIdx++
-				}
-			}},
-		).
-		Layout(renderInstaller())
+		Flags(g.WindowFlagsNoDecoration | g.WindowFlagsNoSavedSettings).
+		Layout(wizardLayout())
 
 	g.PopStyleColor()
 	g.PopStyle()
