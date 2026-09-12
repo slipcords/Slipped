@@ -83,7 +83,6 @@ func main() {
 	}
 
 	win = g.NewMasterWindow("Slipped", 1200, 800, linuxFlags)
-	initIconTexture()
 
 	icon, _, err := image.Decode(bytes.NewReader(iconBytes))
 	if err != nil {
@@ -779,6 +778,11 @@ func donePage(wh int) g.Widget {
 }
 
 func loop() {
+	if logoTexture == nil {
+		// Textures need a live (*MasterWindow).Run context; giu asserts on
+		// NewTextureFromRgba before that, so load on the first frame.
+		initIconTexture()
+	}
 	curAlpha, curRise = pageAnim()
 
 	if page == pgWelcome && time.Since(welcomeAt) > 4*time.Second {
