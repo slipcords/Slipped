@@ -779,7 +779,6 @@ func donePage(wh int) g.Widget {
 }
 
 func loop() {
-	_, wh := win.GetSize()
 	curAlpha, curRise = pageAnim()
 
 	if page == pgWelcome && time.Since(welcomeAt) > 4*time.Second {
