@@ -583,7 +583,7 @@ func renderInstaller() g.Widget {
 		),
 	)
 	for _, c := range candidates {
-		leftCol = append(leftCol, mutedText(13, c))
+		leftCol = append(leftCol, mutedText(13, c.(string)))
 	}
 
 	// right pane: status
