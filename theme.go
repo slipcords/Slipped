@@ -258,8 +258,8 @@ func drawSky(ww, wh int, origin image.Point, canvas *g.Canvas) {
 			c = color.RGBA{0xF9, 0xCF, 0x87, uint8(255 * a)}
 		}
 		r := int(1 + 0.7*hashf(i*7+6))
-		px := int(origin.X + x)
-		py := int(origin.Y + y)
+		px := int(origin.X) + int(x)
+		py := int(origin.Y) + int(y)
 		canvas.AddRectFilled(image.Pt(px, py), image.Pt(px+r, py+r), c, 0, 0)
 	}
 
@@ -276,7 +276,7 @@ func drawSky(ww, wh int, origin image.Point, canvas *g.Canvas) {
 		d := 0.95 * float32(ww) * ease
 		x := sx + d*0.82
 		y := sy + d*0.36
-		head := image.Pt(int(origin.X+x), int(origin.Y+y))
+		head := image.Pt(int(origin.X)+int(x), int(origin.Y)+int(y))
 		tail := 170
 		tip := image.Pt(head.X-tail, head.Y-int(float32(tail)*0.42))
 		canvas.AddLine(tip, head, rgba(colourGoldDim, 1.2*alpha), 5)
