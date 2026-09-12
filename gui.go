@@ -11,10 +11,10 @@ package main
 import (
 	"bytes"
 	_ "embed"
-	"slipped/buildinfo"
 	"errors"
 	"image"
 	"image/color"
+	"slipped/buildinfo"
 
 	g "github.com/AllenDang/giu"
 	"github.com/AllenDang/imgui-go"
@@ -59,6 +59,7 @@ func init() {
 }
 
 func main() {
+	initFonts()
 	InitGithubDownloader()
 	discords = FindDiscords()
 
@@ -417,10 +418,104 @@ func ShowModal(title, desc string) {
 	g.OpenPopup("#modal" + strconv.Itoa(modalId))
 }
 
+// renderHeader draws the brand lockup (wordmark + tagline) and, right-aligned,
+// the installer version with an outdated notice when one is available.
+func renderHeader() g.Widget {
+	var rightMeta g.Widget = mutedText(14, "Installer "+buildinfo.InstallerTag+" ("+buildinfo.InstallerGitHash+")")
+	if IsSelfOutdated {
+		rightMeta = g.Column(
+			rightMeta,
+			g.Style().SetFontSize(13).SetColor(g.StyleColorText, colourWarning).
+				To(g.Label("A new installer version is available")),
+		)
+	}
+
+	return g.Row(
+		g.Column(
+			boldText(38, "Slipped"),
+			g.Style().SetFontSize(14).SetColor(g.StyleColorText, colourMuted).
+				To(g.Label("the Slipcord installer")),
+		),
+		g.Align(g.AlignRight).To(rightMeta),
+	)
+}
+
+// renderSecurityBanner replaces the old full-bleed yellow warning with a calm,
+// hairline amber card that carries the same message without shouting.
+func renderSecurityBanner(width float32) g.Widget {
+	msg := "Only **GitHub** and **github.com/Slipcords/Slipped** are the official places to get Slipcord. Any other site claiming to be us is malicious.\n" +
+		"If you downloaded from any other source, delete or uninstall everything from it immediately, run a malware scan, and change your Discord password."
+	return g.Style().
+		SetColor(g.StyleColorChildBg, colourWarningDim).
+		SetColor(g.StyleColorBorder, colourWarning).
+		SetStyle(g.StyleVarWindowPadding, 18, 14).
+		SetStyleFloat(g.StyleVarChildBorderSize, 1).
+		SetStyleFloat(g.StyleVarChildRounding, 10).
+		To(
+			g.Child().Border(true).Size(width, 98).Layout(
+				g.Column(
+					g.Style().SetFont(sliptFontBold).SetFontSize(15).SetColor(g.StyleColorText, colourWarning).
+						To(g.Label("Security notice")),
+					g.Dummy(0, 4),
+					g.Markdown(&msg),
+				),
+			),
+		)
+}
+
+// installOptionRow is one selectable target: a blurple-highlighted headline row
+// with a success-coloured badge and the install path underneath.
+func installOptionRow(name, installPath string, patched, selected bool, onClick func()) g.Widget {
+	return g.Custom(func() {
+		availW, _ := g.GetAvailableRegion()
+		headlineStyle := selectionStyle(selected).
+			SetStyle(g.StyleVarFramePadding, 14, 10).
+			SetStyleFloat(g.StyleVarFrameRounding, 8)
+
+		if patched {
+			g.Row(
+				headlineStyle.To(
+					g.Selectable(name).Selected(selected).Size(availW-84, 0).OnClick(onClick),
+				),
+				g.Style().SetFontSize(13).SetColor(g.StyleColorText, colourSuccess).
+					To(g.Label("PATCHED")),
+			).Build()
+		} else {
+			headlineStyle.To(
+				g.Selectable(name).Selected(selected).Size(availW, 0).OnClick(onClick),
+			).Build()
+		}
+
+		g.Dummy(0, 3).Build()
+		mutedText(13, installPath).Build()
+		g.Dummy(0, 4).Build()
+	})
+}
+
+func metaLine(key, value string, warn bool) g.Widget {
+	return g.Row(
+		mutedText(14, key),
+		g.Dummy(10, 0),
+		g.Style().
+			SetFontSize(14).
+			SetColor(g.StyleColorText, Ternary(warn, colourWarning, colourText)).
+			To(g.Label(value)),
+	)
+}
+
 func renderInstaller() g.Widget {
 	candidates := makeAutoComplete()
-	wi, _ := win.GetSize()
-	w := float32(wi) - 96
+	if len(candidates) > 6 {
+		candidates = candidates[:6]
+	}
+	wi, hi := win.GetSize()
+	w := float32(wi) - 80
+	contentH := float32(hi) - 60
+
+	mainH := contentH - 280
+	if mainH < 220 {
+		mainH = 220
+	}
 
 	var currentDiscord *DiscordInstall
 	if radioIdx != customChoiceIdx {
@@ -433,146 +528,151 @@ func renderInstaller() g.Widget {
 		g.OpenPopup("#update-prompt")
 	}
 
-	layout := g.Layout{
-		g.Dummy(0, 20),
-		g.Separator(),
-		g.Dummy(0, 5),
-
-		g.Style().SetFontSize(20).To(
-			renderErrorCard(
-				DiscordYellow,
-				"**Github** and **github.com/Slipcords/Slipped** are the only official places to get Slipcord. Any other site claiming to be us is malicious.\n"+
-					"If you downloaded from any other source, you should delete / uninstall everything immediately, run a malware scan and change your Discord password.",
-				90,
-			),
-		),
-
-		g.Dummy(0, 5),
-
-		g.Style().SetFontSize(30).To(
-			g.Label("Please select an install to patch"),
-		),
-
-		&CondWidget{len(discords) == 0, func() g.Widget {
-			s := "No Discord installs found. You first need to install Discord."
-			if runtime.GOOS == "linux" {
-				s += " snap is not supported."
-			}
-			return g.Label(s)
-		}, nil},
-
-		g.Style().SetFontSize(20).To(
-			g.RangeBuilder("Discords", discords, func(i int, v any) g.Widget {
-				d := v.(*DiscordInstall)
-				//goland:noinspection GoDeprecation
-				text := strings.Title(d.branch) + " - " + d.path
-				if d.isPatched {
-					text += " [PATCHED]"
-				}
-				return g.RadioButton(text, radioIdx == i).
-					OnChange(makeRadioOnChange(i))
-			}),
-
-			g.RadioButton("Custom Install Location", radioIdx == customChoiceIdx).
-				OnChange(makeRadioOnChange(customChoiceIdx)),
-		),
-
-		g.Dummy(0, 5),
-		g.Style().
-			SetStyle(g.StyleVarFramePadding, 16, 16).
-			SetFontSize(20).
-			To(
-				g.InputText(&customDir).Hint("The custom location").
-					Size(w - 16).
-					Flags(g.InputTextFlagsCallbackCompletion).
-					OnChange(onCustomInputChanged).
-					// this library has its own autocomplete but it's broken
-					Callback(
-						func(data imgui.InputTextCallbackData) int32 {
-							if len(candidates) == 0 {
-								return 0
-							}
-							// just wrap around
-							if autoCompleteIdx >= len(candidates) {
-								autoCompleteIdx = 0
-							}
-
-							// used by change handler
-							didAutoComplete = true
-
-							start := len(customDir)
-							// Delete previous auto complete
-							if lastAutoComplete != "" {
-								start -= len(lastAutoComplete)
-								data.DeleteBytes(start, len(lastAutoComplete))
-							} else if autoCompleteFile != "" { // delete partial input
-								start -= len(autoCompleteFile)
-								data.DeleteBytes(start, len(autoCompleteFile))
-							}
-
-							// Insert auto complete
-							lastAutoComplete = candidates[autoCompleteIdx].(string)
-							data.InsertBytes(start, []byte(lastAutoComplete))
-							autoCompleteIdx++
-
+	// left pane: install targets
+	var leftCol g.Layout
+	if len(discords) == 0 {
+		s := "No Discord installs found. You first need to install Discord."
+		if runtime.GOOS == "linux" {
+			s += " snap is not supported."
+		}
+		leftCol = append(leftCol, mutedText(15, s))
+	}
+	for i, v := range discords {
+		d := v.(*DiscordInstall)
+		leftCol = append(leftCol, installOptionRow(strings.Title(d.branch), d.path, d.isPatched, radioIdx == i, makeRadioOnChange(i)))
+	}
+	leftCol = append(leftCol,
+		installOptionRow("Custom Install Location", Ternary(customDir != "", customDir, "Select a folder"), false, radioIdx == customChoiceIdx, makeRadioOnChange(customChoiceIdx)),
+		g.Dummy(0, 6),
+		inputBoxStyle().To(
+			g.InputText(&customDir).Hint("The custom location").
+				Flags(g.InputTextFlagsCallbackCompletion).
+				OnChange(onCustomInputChanged).
+				// this library has its own autocomplete but it's broken
+				Callback(
+					func(data imgui.InputTextCallbackData) int32 {
+						if len(candidates) == 0 {
 							return 0
-						},
-					),
-			),
-		g.RangeBuilder("AutoComplete", candidates, func(i int, v any) g.Widget {
-			dir := v.(string)
-			return g.Label(dir)
-		}),
+						}
+						// just wrap around
+						if autoCompleteIdx >= len(candidates) {
+							autoCompleteIdx = 0
+						}
 
-		g.Dummy(0, 20),
+						// used by change handler
+						didAutoComplete = true
 
-		g.Style().SetFontSize(20).To(
-			g.Row(
-				g.Style().
-					SetColor(g.StyleColorButton, DiscordGreen).
-					SetDisabled(GithubError != nil).
-					To(
-						g.Button("Install").
-							OnClick(handlePatch).
-							Size((w-40)/4, 50),
-						Tooltip("Patch the selected Discord Install"),
-					),
-				g.Style().
-					SetColor(g.StyleColorButton, DiscordBlue).
-					SetDisabled(GithubError != nil).
-					To(
-						g.Button("Reinstall / Repair").
-							OnClick(func() {
-								if IsDevInstall {
-									handlePatch()
-								} else {
-									err := InstallLatestBuilds()
-									if err == nil {
-										handlePatch()
-									}
-								}
-							}).
-							Size((w-40)/4, 50),
-						Tooltip("Reinstall & Update Slipcord"),
-					),
-				g.Style().
-					SetColor(g.StyleColorButton, DiscordRed).
-					To(
-						g.Button("Uninstall").
-							OnClick(handleUnpatch).
-							Size((w-40)/4, 50),
-						Tooltip("Unpatch the selected Discord Install"),
-					),
-				g.Style().
-					SetColor(g.StyleColorButton, Ternary(isOpenAsar, DiscordRed, DiscordGreen)).
-					To(
-						g.Button(Ternary(isOpenAsar, "Uninstall OpenAsar", Ternary(currentDiscord != nil, "Install OpenAsar", "(Un-)Install OpenAsar"))).
-							OnClick(handleOpenAsar).
-							Size((w-40)/4, 50),
-						Tooltip("Manage OpenAsar"),
-					),
-			),
+						start := len(customDir)
+						// Delete previous auto complete
+						if lastAutoComplete != "" {
+							start -= len(lastAutoComplete)
+							data.DeleteBytes(start, len(lastAutoComplete))
+						} else if autoCompleteFile != "" { // delete partial input
+							start -= len(autoCompleteFile)
+							data.DeleteBytes(start, len(autoCompleteFile))
+						}
+
+						// Insert auto complete
+						lastAutoComplete = candidates[autoCompleteIdx].(string)
+						data.InsertBytes(start, []byte(lastAutoComplete))
+						autoCompleteIdx++
+
+						return 0
+					},
+				),
 		),
+	)
+	for _, c := range candidates {
+		leftCol = append(leftCol, mutedText(13, c))
+	}
+
+	// right pane: status
+	dirLine := "Slipcord will be downloaded to:"
+	if IsDevInstall {
+		dirLine = "Dev Install:"
+	}
+	var rightCol g.Layout
+	rightCol = append(rightCol,
+		sectionTitle("Status"),
+		g.Dummy(0, 10),
+		g.Style().SetFontSize(16).To(g.Label(dirLine)),
+		g.Style().SetFontSize(16).To(g.Label(SlipcordDirectory).Wrapped(true)),
+		g.Dummy(0, 10),
+		g.Style().
+			SetColor(g.StyleColorButton, colourSurfaceAlt).
+			SetColor(g.StyleColorButtonHovered, colourSurfaceHover).
+			SetColor(g.StyleColorButtonActive, colourSurfaceAlt).
+			SetStyle(g.StyleVarFramePadding, 12, 8).
+			SetStyleFloat(g.StyleVarFrameRounding, 8).
+			To(
+				g.Button("Open Directory").OnClick(func() {
+					g.OpenURL("file://" + path.Dir(SlipcordDirectory))
+				}).Size(150, 32),
+			),
+		&CondWidget{!IsDevInstall, func() g.Widget {
+			return g.Style().SetFontSize(13).SetColor(g.StyleColorText, colourMuted).To(
+				g.Label("To customise this location, set the environment variable 'SLIPCORD_USER_DATA_DIR' and restart me").Wrapped(true),
+			)
+		}, nil},
+		g.Dummy(0, 14),
+		g.Style().SetColor(g.StyleColorSeparator, colourLine).To(g.Separator()),
+		g.Dummy(0, 8),
+		metaLine("Installer", buildinfo.InstallerTag+" ("+buildinfo.InstallerGitHash+")", IsSelfOutdated),
+		metaLine("Local Slipcord", Ternary(InstalledHash == "", "None", shortHash(InstalledHash)), false),
+		&CondWidget{
+			GithubError == nil,
+			func() g.Widget {
+				if IsDevInstall {
+					return metaLine("Latest", "not updating (DevMode)", false)
+				}
+				return metaLine("Latest Slipcord", shortHash(LatestHash), false)
+			}, func() g.Widget {
+				return renderErrorCard(DiscordRed, "Failed to fetch Info from GitHub: "+GithubError.Error(), 40)
+			},
+		},
+	)
+
+	mainRow := g.Row(
+		paneCard(w*0.60, mainH, leftCol...),
+		g.Dummy(12, 0),
+		paneCard(w*0.38, mainH, rightCol...),
+	)
+
+	bw := (w - 36) / 4
+	openAsarBg := colourSuccess
+	openAsarHover := colourSuccessHover
+	openAsarActive := colourSuccessDim
+	if isOpenAsar {
+		openAsarBg = colourDanger
+		openAsarHover = colourDangerHover
+		openAsarActive = colourDangerDk
+	}
+	actionBar := g.Row(
+		actionButton("Install", colourAccent, colourAccentHover, colourAccentDim, "Patch the selected Discord Install", GithubError != nil, bw, 46, handlePatch),
+		actionButton("Reinstall / Repair", colourSurfaceAlt, colourSurfaceHover, colourSurfaceAlt, "Reinstall & Update Slipcord", GithubError != nil, bw, 46, func() {
+			if IsDevInstall {
+				handlePatch()
+			} else {
+				err := InstallLatestBuilds()
+				if err == nil {
+					handlePatch()
+				}
+			}
+		}),
+		actionButton("Uninstall", colourDanger, colourDangerHover, colourDangerDk, "Unpatch the selected Discord Install", false, bw, 46, handleUnpatch),
+		actionButton(Ternary(isOpenAsar, "Uninstall OpenAsar", Ternary(currentDiscord != nil, "Install OpenAsar", "(Un-)Install OpenAsar")), openAsarBg, openAsarHover, openAsarActive, "Manage OpenAsar", false, bw, 46, handleOpenAsar),
+	)
+
+	return g.Layout{
+		renderHeader(),
+		g.Dummy(0, 8),
+		g.Style().SetColor(g.StyleColorSeparator, colourLine).To(g.Separator()),
+		g.Dummy(0, 16),
+		renderSecurityBanner(w),
+		g.Dummy(0, 16),
+		mainRow,
+		g.Dummy(0, 14),
+		actionBar,
 
 		InfoModal("#patched", "Successfully Patched", "If Discord is still open, fully close it first.\n"+
 			"Then, start it and verify Slipcord installed successfully by looking for its category in Discord Settings"),
@@ -595,31 +695,28 @@ func renderInstaller() g.Widget {
 
 		UpdateModal(),
 	}
-
-	return layout
 }
 
 func renderErrorCard(col color.Color, message string, height float32) g.Widget {
 	return g.Style().
-		SetColor(g.StyleColorChildBg, col).
-		SetStyleFloat(g.StyleVarAlpha, 0.9).
-		SetStyle(g.StyleVarWindowPadding, 10, 10).
-		SetStyleFloat(g.StyleVarChildRounding, 5).
+		SetColor(g.StyleColorChildBg, colourDangerDim).
+		SetColor(g.StyleColorBorder, col).
+		SetColor(g.StyleColorText, col).
+		SetStyle(g.StyleVarWindowPadding, 12, 10).
+		SetStyleFloat(g.StyleVarChildBorderSize, 1).
+		SetStyleFloat(g.StyleVarChildRounding, 10).
 		To(
-			g.Child().
-				Size(g.Auto, height).
-				Layout(
-					g.Row(
-						g.Style().SetColor(g.StyleColorText, color.Black).To(
-							g.Markdown(&message),
-						),
-					),
+			g.Child().Border(true).Size(g.Auto, height).Layout(
+				g.Row(
+					g.Markdown(&message),
 				),
+			),
 		)
 }
 
 func loop() {
-	g.PushWindowPadding(48, 48)
+	g.PushWindowPadding(40, 30)
+	g.PushColorWindowBg(colourBg)
 
 	g.SingleWindow().
 		RegisterKeyboardShortcuts(
@@ -634,47 +731,7 @@ func loop() {
 				}
 			}},
 		).
-		Layout(
-			g.Align(g.AlignCenter).To(
-				g.Style().SetFontSize(40).To(
-					g.Label("Slipped"),
-				),
-			),
-
-			g.Dummy(0, 20),
-			g.Style().SetFontSize(20).To(
-				g.Row(
-					g.Label(Ternary(IsDevInstall, "Dev Install: ", "Slipcord will be downloaded to: ")+SlipcordDirectory),
-					g.Style().
-						SetColor(g.StyleColorButton, DiscordBlue).
-						SetStyle(g.StyleVarFramePadding, 4, 4).
-						To(
-							g.Button("Open Directory").OnClick(func() {
-								g.OpenURL("file://" + path.Dir(SlipcordDirectory))
-							}),
-						),
-				),
-				&CondWidget{!IsDevInstall, func() g.Widget {
-					return g.Label("To customise this location, set the environment variable 'SLIPCORD_USER_DATA_DIR' and restart me").Wrapped(true)
-				}, nil},
-				g.Dummy(0, 10),
-				g.Label("Slipped Version: "+buildinfo.InstallerTag+" ("+buildinfo.InstallerGitHash+")"+Ternary(IsSelfOutdated, " - OUTDATED", "")),
-				g.Label("Local Slipcord Version: "+InstalledHash),
-				&CondWidget{
-					GithubError == nil,
-					func() g.Widget {
-						if IsDevInstall {
-							return g.Label("Not updating Slipcord due to being in DevMode")
-						}
-						return g.Label("Latest Slipcord Version: " + LatestHash)
-					}, func() g.Widget {
-						return renderErrorCard(DiscordRed, "Failed to fetch Info from GitHub: "+GithubError.Error(), 40)
-					},
-				},
-			),
-
-			renderInstaller(),
-		)
+		Layout(renderInstaller())
 
 	g.PopStyle()
 }
