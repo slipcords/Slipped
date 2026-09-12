@@ -733,5 +733,6 @@ func loop() {
 		).
 		Layout(renderInstaller())
 
+	g.PopStyleColor()
 	g.PopStyle()
 }
