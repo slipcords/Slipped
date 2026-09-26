@@ -19,8 +19,10 @@ require (
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20250301202403-da16c1255728 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
+	github.com/tc-hib/winres v0.2.1 // indirect
 	golang.org/x/image v0.24.0 // indirect
 	gopkg.in/eapache/queue.v1 v1.1.0 // indirect
 )
