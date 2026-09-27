@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+)
+
+// vars instead of the constants so tests can point them at a stub server
+var (
+	downloadRetryDelay = 2 * time.Second
+
+	releaseUrl         = ReleaseUrl
+	releaseUrlFallback = ReleaseUrlFallback
+	latestDownloadUrl  = "https://github.com/Slipcords/Slipped/releases/latest/download/desktop.asar"
 )
 
 type GithubRelease struct {
@@ -95,7 +106,7 @@ func InitGithubDownloader() {
 			GithubDoneChan <- GithubError == nil
 		}()
 
-		data, err := GetGithubRelease(ReleaseUrl, ReleaseUrlFallback)
+		data, err := GetGithubRelease(releaseUrl, releaseUrlFallback)
 		if err != nil {
 			GithubError = err
 			return
@@ -142,6 +153,116 @@ func InitGithubDownloader() {
 	}
 }
 
+// the release is republished on every build, so the asset we resolved can be replaced
+// (and its url start returning 404) while we are installing. Retry with a fresh lookup.
+const downloadAttempts = 3
+
+// asar files start with a 16 byte pickle header followed by a JSON file table
+func isAsarFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	stat, err := f.Stat()
+	if err != nil || stat.Size() < 1_000_000 {
+		return false
+	}
+
+	header := make([]byte, 24)
+	if _, err := f.Read(header); err != nil {
+		return false
+	}
+
+	pickleSize := binary.LittleEndian.Uint32(header[0:4])
+	return pickleSize == 4 && string(header[16:24]) == `{"files"`
+}
+
+func findAsarAsset() string {
+	for _, ass := range ReleaseData.Assets {
+		if ass.Name == "desktop.asar" {
+			return ass.DownloadURL
+		}
+	}
+
+	// name may change one day, any real asar asset will do
+	for _, ass := range ReleaseData.Assets {
+		if strings.HasSuffix(ass.Name, ".asar") && !strings.Contains(ass.Name, "LEGAL") {
+			return ass.DownloadURL
+		}
+	}
+
+	return ""
+}
+
+// re-read the release so a replaced asset gets resolved again
+func refreshReleaseData() {
+	data, err := GetGithubRelease(releaseUrl, releaseUrlFallback)
+	if err != nil {
+		Log.Debug("Failed to refresh release data:", err)
+		return
+	}
+
+	ReleaseData = *data
+	LatestHash = data.Name[strings.LastIndex(data.Name, " ")+1:]
+}
+
+// download to a temp file first so a failed or partial download can never clobber the
+// current working install
+func downloadAsar(url string) (err error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", UserAgent)
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode >= 300 {
+		return fmt.Errorf("%s returned %s", url, res.Status)
+	}
+
+	tmp, err := os.CreateTemp(path.Dir(SlipcordDirectory), ".slipcord-*.asar")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	defer func() {
+		tmp.Close()
+		if err != nil {
+			os.Remove(tmpName)
+		}
+	}()
+
+	written, err := io.Copy(tmp, res.Body)
+	if err != nil {
+		return err
+	}
+
+	if expected := res.Header.Get("Content-Length"); expected != "" && expected != strconv.FormatInt(written, 10) {
+		return fmt.Errorf("unexpected end of input: Content-Length was %s, but only read %d", expected, written)
+	}
+
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+
+	if !isAsarFile(tmpName) {
+		return fmt.Errorf("%s did not return a valid asar archive", url)
+	}
+
+	return os.Rename(tmpName, SlipcordDirectory)
+}
+
 func installLatestBuilds() (retErr error) {
 	Log.Debug("Installing latest builds...")
 
@@ -150,54 +271,46 @@ func installLatestBuilds() (retErr error) {
 		return
 	}
 
-	downloadUrl := ""
-	for _, ass := range ReleaseData.Assets {
-		if ass.Name == "desktop.asar" {
-			downloadUrl = ass.DownloadURL
-			break
-		}
+	resolved := findAsarAsset()
+	if resolved == "" {
+		refreshReleaseData()
+		resolved = findAsarAsset()
 	}
-
-	if downloadUrl == "" {
+	if resolved == "" {
 		retErr = errors.New("Didn't find desktop.asar download link")
 		Log.Error(retErr)
 		return
 	}
 
-	Log.Debug("Downloading desktop.asar")
+	// the canonical latest-download url resolves to whatever asset is current, so it keeps
+	// working after the release replaces the asset we resolved above
+	urls := []string{resolved, latestDownloadUrl}
 
-	res, err := http.Get(downloadUrl)
-	if err == nil && res.StatusCode >= 300 {
-		err = errors.New(res.Status)
-	}
-	if err != nil {
-		Log.Error("Failed to download desktop.asar:", err)
-		retErr = err
-		return
-	}
-	out, err := os.OpenFile(SlipcordDirectory, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		Log.Error("Failed to create", SlipcordDirectory+":", err)
-		retErr = err
-		return
-	}
-	read, err := io.Copy(out, res.Body)
-	if err != nil {
-		Log.Error("Failed to download to", SlipcordDirectory+":", err)
-		retErr = err
-		return
-	}
-	contentLength := res.Header.Get("Content-Length")
-	expected := strconv.FormatInt(read, 10)
-	if expected != contentLength {
-		err = errors.New("Unexpected end of input. Content-Length was " + contentLength + ", but I only read " + expected)
-		Log.Error(err.Error())
-		retErr = err
-		return
+	var lastErr error
+	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		for _, url := range urls {
+			Log.Debug("Downloading", url)
+
+			if err := downloadAsar(url); err != nil {
+				lastErr = err
+				Log.Debug("Download failed:", err)
+				continue
+			}
+
+			_ = FixOwnership(SlipcordDirectory)
+			InstalledHash = LatestHash
+			return
+		}
+
+		if attempt < downloadAttempts {
+			Log.Debug("Retrying download in", downloadRetryDelay*time.Duration(attempt))
+			time.Sleep(downloadRetryDelay * time.Duration(attempt))
+			refreshReleaseData()
+			urls = []string{findAsarAsset(), urls[1]}
+		}
 	}
 
-	_ = FixOwnership(SlipcordDirectory)
-
-	InstalledHash = LatestHash
+	retErr = fmt.Errorf("Failed to download desktop.asar after %d attempts: %v. The release is probably mid-upload, try again in a minute.", downloadAttempts, lastErr)
+	Log.Error(retErr)
 	return
 }
