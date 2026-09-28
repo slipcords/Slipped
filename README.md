@@ -1,6 +1,6 @@
 # Slipped
 
-The Slipcord Installer allows you to install [Slipcord](https://github.com/Slipcords/Slipped).
+The Slipcord Installer allows you to install [Slipcord](https://github.com/Slipcords/Slipcord).
 
 ## Usage
 
